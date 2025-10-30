@@ -1,40 +1,47 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"time"
+	"viduli-test-app/database"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
+	"github.com/joho/godotenv"
 )
 
-// var (
-// 	rdb *redis.Client
-// 	ctx = context.Background()
-// )
+var (
+	rdb *redis.Client
+	ctx = context.Background()
+)
 
 func main() {
 	// Load .env file
-	// var err error
-	// err = godotenv.Load()
-	// if err != nil {
-	// 	log.Println("No .env file found, using environment variables")
-	// }
+	var err error
+	err = godotenv.Load()
+	if err != nil {
+		log.Println("No .env file found, using environment variables")
+	}
 
-	// // Connect to PostgreSQL
-	// database.ConnectDB()
+	// Connect to PostgreSQL
+	database.ConnectDB()
 
-	// // Connect to Redis
-	// rdb = redis.NewClient(&redis.Options{
-	// 	Addr:     fmt.Sprintf("%s:%s", os.Getenv("REDIS_HOST"), os.Getenv("REDIS_PORT")),
-	// 	Password: os.Getenv("REDIS_PASSWORD"), // no password set
-	// 	DB:       0,                           // use default DB
-	// })
+	// Connect to Redis
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%s", os.Getenv("REDIS_HOST"), os.Getenv("REDIS_PORT")),
+		Password: os.Getenv("REDIS_PASSWORD"), // no password set
+		DB:       0,                           // use default DB
+	})
 
-	// 	_, err = rdb.Ping(ctx).Result()
-	// if err != nil {
-	// 	log.Fatalf("Could not connect to Redis: %v", err)
-	// }
-	// log.Println("Connected to Redis")
+	_, err = rdb.Ping(ctx).Result()
+	if err != nil {
+		log.Fatalf("Could not connect to Redis: %v", err)
+	}
+	log.Println("Connected to Redis")
 
 	r := gin.Default()
 
@@ -43,86 +50,86 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// // Item endpoints
-	// r.POST("/items", createItem)
-	// r.GET("items", getItems)
+	// Item endpoints
+	r.POST("/items", createItem)
+	r.GET("items", getItems)
 
-	// // Cache endpoints
-	// r.POST("/cache", setCache)
-	// r.GET("/cache/:key", getCache)
+	// Cache endpoints
+	r.POST("/cache", setCache)
+	r.GET("/cache/:key", getCache)
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	// log.Printf("Server listening on port %s", port)
-	// if err := r.Run(":" + port); err != nil {
-	// 	log.Fatal(err)
-	// }
+	log.Printf("Server listening on port %s", port)
+	if err := r.Run(":" + port); err != nil {
+		log.Fatal(err)
+	}
 }
 
-// // POST /items
-// func createItem(c *gin.Context) {
-// 	var newItem database.Item
-// 	if err := c.ShouldBindJSON(&newItem); err != nil {
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-// 		return
-// 	}
+// POST /items
+func createItem(c *gin.Context) {
+	var newItem database.Item
+	if err := c.ShouldBindJSON(&newItem); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-// 	newItem.CreatedAt = time.Now()
+	newItem.CreatedAt = time.Now()
 
-// 	if err := database.DB.Create(&newItem).Error; err != nil {
-// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create item"})
-// 		return
-// 	}
+	if err := database.DB.Create(&newItem).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create item"})
+		return
+	}
 
-// 	c.JSON(http.StatusCreated, newItem)
-// }
+	c.JSON(http.StatusCreated, newItem)
+}
 
-// // GET /items
-// func getItems(c *gin.Context) {
-// 	var items []database.Item
-// 	if err := database.DB.Find(&items).Error; err != nil {
-// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve items"})
-// 		return
-// 	}
+// GET /items
+func getItems(c *gin.Context) {
+	var items []database.Item
+	if err := database.DB.Find(&items).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve items"})
+		return
+	}
 
-// 	c.JSON(http.StatusOK, items)
-// }
+	c.JSON(http.StatusOK, items)
+}
 
-// // POST /cache
-// func setCache(c *gin.Context) {
-// 	var newCacheItem struct {
-// 		Key   string `json:"key"`
-// 		Value string `json:"value"`
-// 	}
+// POST /cache
+func setCache(c *gin.Context) {
+	var newCacheItem struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
 
-// 	if err := c.ShouldBindJSON(&newCacheItem); err != nil {
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-// 		return
-// 	}
+	if err := c.ShouldBindJSON(&newCacheItem); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-// 	err := rdb.Set(ctx, newCacheItem.Key, newCacheItem.Value, 1*time.Minute).Err()
-// 	if err != nil {
-// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set cache"})
-// 		return
-// 	}
+	err := rdb.Set(ctx, newCacheItem.Key, newCacheItem.Value, 1*time.Minute).Err()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set cache"})
+		return
+	}
 
-// 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
-// }
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
 
-// // GET /cache/:key
-// func getCache(c *gin.Context) {
-// 	key := c.Param("key")
-// 	val, err := rdb.Get(ctx, key).Result()
-// 	if err == redis.Nil {
-// 		c.JSON(http.StatusNotFound, gin.H{"error": "Key not found"})
-// 		return
-// 	} else if err != nil {
-// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get cache"})
-// 		return
-// 	}
+// GET /cache/:key
+func getCache(c *gin.Context) {
+	key := c.Param("key")
+	val, err := rdb.Get(ctx, key).Result()
+	if err == redis.Nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Key not found"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get cache"})
+		return
+	}
 
-// 	c.JSON(http.StatusOK, gin.H{"value": val})
-// }
+	c.JSON(http.StatusOK, gin.H{"value": val})
+}
