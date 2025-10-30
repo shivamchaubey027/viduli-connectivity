@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// Item is our database model
 type Item struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	Name      string    `json:"name"`
@@ -19,16 +18,14 @@ type Item struct {
 
 var DB *gorm.DB
 
-// ConnectDB connects to the database using environment variables
 func ConnectDB() {
 	var err error
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_NAME"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("SSL_MODE"),
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require",
+		os.Getenv("NEW_POSTGRES_DATABASE_HOST"),
+		os.Getenv("NEW_POSTGRES_DATABASE_USER"),
+		os.Getenv("NEW_POSTGRES_DATABASE_PASSWORD"),
+		os.Getenv("NEW_POSTGRES_DATABASE_DATA"),
+		os.Getenv("NEW_POSTGRES_DATABASE_PORT"),
 	)
 
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
