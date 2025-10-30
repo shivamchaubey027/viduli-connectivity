@@ -67,6 +67,13 @@ func main() {
 	if err := r.Run(":" + port); err != nil {
 		log.Fatal(err)
 	}
+
+	log.Println("--- DEBUGGING ENV VARS ---")
+	log.Printf("DB_HOST: [%s]", os.Getenv("DB_HOST"))
+	log.Printf("DB_USER: [%s]", os.Getenv("DB_USER"))
+	log.Printf("DB_NAME: [%s]", os.Getenv("DB_NAME"))
+	log.Printf("SSL_MODE: [%s]", os.Getenv("SSL_MODE"))
+	log.Println("----------------------------")
 }
 
 // POST /items
