@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"time"
 
@@ -20,7 +21,16 @@ var DB *gorm.DB
 
 func ConnectDB() {
 	var err error
-	dsn := os.Getenv("NEW_POSTGRES_DATABASE_URL")
+
+	host := os.Getenv("NEW_POSTGRES_DATABASE_HOST")
+	user := os.Getenv("NEW_POSTGRES_DATABASE_USER")
+	password := url.QueryEscape(os.Getenv("NEW_POSTGRES_DATABASE_PASSWORD"))
+	dbname := os.Getenv("NEW_POSTGRES_DATABASE_DATABASE")
+	port := os.Getenv("NEW_POSTGRES_DATABASE_PORT")
+
+	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=disable",
+		user, password, host, port, dbname)
+
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
