@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"time"
 
@@ -21,21 +22,34 @@ var DB *gorm.DB
 func ConnectDB() {
 	var err error
 
-	// Use the full URL provided by Orbit DB
-	dsn_debug := os.Getenv("NEW_POSTGRES_DATABASE_URL")
-	log.Printf("DEBUG DSN: [%s]", dsn_debug)
+	host := os.Getenv("NEW_POSTGRES_DATABASE_HOST")
+	port := os.Getenv("NEW_POSTGRES_DATABASE_PORT")
+	user := os.Getenv("NEW_POSTGRES_DATABASE_USER")
+	dbname := os.Getenv("NEW_POSTGRES_DATABASE_DATA")
+	passwordRaw := os.Getenv("NEW_POSTGRES_DATABASE_PASSWORD")
 
-	if dsn_debug == "" {
-		log.Fatal("NEW_POSTGRES_DATABASE_URL environment variable not set")
+	if host == "" || port == "" || user == "" || dbname == "" || passwordRaw == "" {
+		log.Fatal("Database environment variables are not fully set")
 	}
 
-	fmt.Printf("Connecting using provided URL\n")
+	password := url.QueryEscape(passwordRaw)
 
-	DB, err = gorm.Open(postgres.Open(dsn_debug), &gorm.Config{})
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require",
+		host,
+		user,
+		password,
+		dbname,
+		port,
+	)
+
+	log.Println("Connecting to database...")
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	fmt.Println("Database connected successfully!")
+	log.Println("Database connected successfully!")
+
 	DB.AutoMigrate(&Item{})
+	log.Println("Database migration complete.")
 }
