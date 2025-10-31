@@ -24,12 +24,19 @@ func ConnectDB() {
 
 	host := os.Getenv("NEW_POSTGRES_DATABASE_HOST")
 	user := os.Getenv("NEW_POSTGRES_DATABASE_USER")
-	password := url.QueryEscape(os.Getenv("NEW_POSTGRES_DATABASE_PASSWORD"))
+	rawPassword := os.Getenv("NEW_POSTGRES_DATABASE_PASSWORD")
 	dbname := os.Getenv("NEW_POSTGRES_DATABASE_DATABASE")
 	port := os.Getenv("NEW_POSTGRES_DATABASE_PORT")
 
+	// Properly encode username and password for URL
+	encodedUser := url.QueryEscape(user)
+	encodedPassword := url.QueryEscape(rawPassword)
+
 	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=disable",
-		user, password, host, port, dbname)
+		encodedUser, encodedPassword, host, port, dbname)
+
+	// Debug: print DSN without password
+	fmt.Printf("Connecting to: postgresql://%s:****@%s:%s/%s\n", user, host, port, dbname)
 
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
