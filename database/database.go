@@ -3,7 +3,6 @@ package database
 import (
 	"fmt"
 	"log"
-	"net/url"
 	"os"
 	"time"
 
@@ -22,35 +21,20 @@ var DB *gorm.DB
 func ConnectDB() {
 	var err error
 
-	host := os.Getenv("NEW_POSTGRES_DATABASE_HOST")
-	user := os.Getenv("NEW_POSTGRES_DATABASE_USER")
-	rawPassword := os.Getenv("NEW_POSTGRES_DATABASE_PASSWORD")
-	dbname := os.Getenv("NEW_POSTGRES_DATABASE_DATABASE")
-	port := os.Getenv("NEW_POSTGRES_DATABASE_PORT")
+	// Use the full URL provided by Orbit DB
+	dsn := os.Getenv("NEW_POSTGRES_DATABASE_URL")
 
-	// Properly encode for URL
-	encodedUser := url.QueryEscape(user)
-	encodedPassword := url.QueryEscape(rawPassword)
+	if dsn == "" {
+		log.Fatal("NEW_POSTGRES_DATABASE_URL environment variable not set")
+	}
 
-	// Try with sslmode=require first
-	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=require",
-		encodedUser, encodedPassword, host, port, dbname)
-
-	fmt.Printf("Attempting connection to: postgresql://%s:****@%s:%s/%s\n", user, host, port, dbname)
+	fmt.Printf("Connecting using provided URL\n")
 
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		// If sslmode=require fails, try prefer
-		fmt.Println("Retrying with sslmode=prefer...")
-		dsn = fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=prefer",
-			encodedUser, encodedPassword, host, port, dbname)
-
-		DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
-		if err != nil {
-			log.Fatalf("Failed to connect to database: %v", err)
-		}
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	fmt.Println("Database connected")
+	fmt.Println("Database connected successfully!")
 	DB.AutoMigrate(&Item{})
 }
