@@ -28,23 +28,29 @@ func ConnectDB() {
 	dbname := os.Getenv("NEW_POSTGRES_DATABASE_DATABASE")
 	port := os.Getenv("NEW_POSTGRES_DATABASE_PORT")
 
-	// Properly encode username and password for URL
+	// Properly encode for URL
 	encodedUser := url.QueryEscape(user)
 	encodedPassword := url.QueryEscape(rawPassword)
 
-	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=disable",
+	// Try with sslmode=require first
+	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=require",
 		encodedUser, encodedPassword, host, port, dbname)
 
-	// Debug: print DSN without password
-	fmt.Printf("Connecting to: postgresql://%s:****@%s:%s/%s\n", user, host, port, dbname)
+	fmt.Printf("Attempting connection to: postgresql://%s:****@%s:%s/%s\n", user, host, port, dbname)
 
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		// If sslmode=require fails, try prefer
+		fmt.Println("Retrying with sslmode=prefer...")
+		dsn = fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=prefer",
+			encodedUser, encodedPassword, host, port, dbname)
+
+		DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		if err != nil {
+			log.Fatalf("Failed to connect to database: %v", err)
+		}
 	}
 
 	fmt.Println("Database connected")
-
-	// Migrate the schema
 	DB.AutoMigrate(&Item{})
 }
