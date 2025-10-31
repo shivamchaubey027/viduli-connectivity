@@ -22,9 +22,10 @@ func ConnectDB() {
 	var err error
 
 	// Use the full URL provided by Orbit DB
-	dsn := os.Getenv("NEW_POSTGRES_DATABASE_URL")
+	dsn_debug := os.Getenv("NEW_POSTGRES_DATABASE_URL")
+	log.Printf("DEBUG DSN: [%s]", dsn_debug)
 
-	if dsn == "" {
+	if dsn_debug == "" {
 		log.Fatal("NEW_POSTGRES_DATABASE_URL environment variable not set")
 	}
 
