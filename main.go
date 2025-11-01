@@ -22,13 +22,13 @@ var (
 	ctx   = context.Background()
 )
 
-// Todo model
-type Todo struct {
-	ID        uint      `json:"id" gorm:"primary_key"`
-	Title     string    `json:"title"`
-	Completed bool      `json:"completed"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+// Item model
+type Item struct {
+	ID          uint      `json:"id" gorm:"primaryKey"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func connectDB() error {
@@ -91,7 +91,7 @@ func connectDB() error {
 func connectCache() (*redis.Client, error) {
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
-		redisURL = "redis://localhost:6380"
+		redisURL = "redis://localhost:6379"
 	}
 
 	opt, err := redis.ParseURL(redisURL)
@@ -117,7 +117,7 @@ func main() {
 		log.Println("DB not available, running without persistent DB:", err)
 	} else {
 		log.Println("Connected to DB, running migrations")
-		if err := db.AutoMigrate(&Todo{}); err != nil {
+		if err := db.AutoMigrate(&Item{}); err != nil {
 			log.Printf("AutoMigrate warning: %v", err)
 		}
 	}
@@ -153,11 +153,11 @@ func main() {
 
 	api := router.Group("/api")
 	{
-		api.GET("/todos", getTodos)
-		api.POST("/todos", createTodo)
-		api.GET("/todos/:id", getTodo)
-		api.PUT("/todos/:id", updateTodo)
-		api.DELETE("/todos/:id", deleteTodo)
+		api.GET("/items", getItems)
+		api.POST("/items", createItem)
+		api.GET("/items/:id", getItem)
+		api.PUT("/items/:id", updateItem)
+		api.DELETE("/items/:id", deleteItem)
 	}
 
 	port := os.Getenv("PORT")
@@ -170,110 +170,114 @@ func main() {
 	}
 }
 
-func getTodos(c *gin.Context) {
-	var todos []Todo
+// Handlers for items
+func getItems(c *gin.Context) {
+	var items []Item
 	if db != nil {
-		db.Find(&todos)
-		c.JSON(http.StatusOK, todos)
+		db.Find(&items)
+		c.JSON(http.StatusOK, items)
 		return
 	}
-	c.JSON(http.StatusOK, todos) // empty if no DB
+	c.JSON(http.StatusOK, items) // empty if no DB
 }
 
-func createTodo(c *gin.Context) {
-	var todo Todo
-	if err := c.ShouldBindJSON(&todo); err != nil {
+func createItem(c *gin.Context) {
+	var item Item
+	if err := c.ShouldBindJSON(&item); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	item.CreatedAt = time.Now()
+	item.UpdatedAt = item.CreatedAt
+
 	if db != nil {
-		if err := db.Create(&todo).Error; err != nil {
+		if err := db.Create(&item).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "DB create failed"})
 			return
 		}
-		c.JSON(http.StatusCreated, todo)
+		c.JSON(http.StatusCreated, item)
 		return
 	}
-	// no persistent DB: set timestamps and return created id = 0
-	todo.CreatedAt = time.Now()
-	todo.UpdatedAt = todo.CreatedAt
-	c.JSON(http.StatusCreated, todo)
+
+	// no persistent DB: return created item (ID will be zero)
+	c.JSON(http.StatusCreated, item)
 }
 
-func getTodo(c *gin.Context) {
-	var todo Todo
+func getItem(c *gin.Context) {
+	var item Item
 	id := c.Param("id")
 
 	// cache hit
 	if cache != nil {
-		if val, err := cache.Get(ctx, "todo:"+id).Result(); err == nil && strings.TrimSpace(val) != "" {
+		if val, err := cache.Get(ctx, "item:"+id).Result(); err == nil && strings.TrimSpace(val) != "" {
 			c.Data(http.StatusOK, "application/json", []byte(val))
 			return
 		}
 	}
 
 	if db == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
 		return
 	}
 
-	if err := db.First(&todo, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+	if err := db.First(&item, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
 		return
 	}
 
 	if cache != nil {
-		if jsonTodo, err := json.Marshal(todo); err == nil {
-			cache.Set(ctx, "todo:"+id, jsonTodo, 10*time.Minute)
+		if jsonItem, err := json.Marshal(item); err == nil {
+			cache.Set(ctx, "item:"+id, jsonItem, 10*time.Minute)
 		}
 	}
 
-	c.JSON(http.StatusOK, todo)
+	c.JSON(http.StatusOK, item)
 }
 
-func updateTodo(c *gin.Context) {
-	var todo Todo
+func updateItem(c *gin.Context) {
+	var item Item
 	id := c.Param("id")
 
 	if db == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
 		return
 	}
 
-	if err := db.First(&todo, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+	if err := db.First(&item, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
 		return
 	}
 
-	if err := c.ShouldBindJSON(&todo); err != nil {
+	if err := c.ShouldBindJSON(&item); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	db.Save(&todo)
+	item.UpdatedAt = time.Now()
+	db.Save(&item)
 	if cache != nil {
-		cache.Del(ctx, "todo:"+id)
+		cache.Del(ctx, "item:"+id)
 	}
-	c.JSON(http.StatusOK, todo)
+	c.JSON(http.StatusOK, item)
 }
 
-func deleteTodo(c *gin.Context) {
-	var todo Todo
+func deleteItem(c *gin.Context) {
+	var item Item
 	id := c.Param("id")
 
 	if db == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
 		return
 	}
 
-	if err := db.First(&todo, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+	if err := db.First(&item, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
 		return
 	}
 
-	db.Delete(&todo)
+	db.Delete(&item)
 	if cache != nil {
-		cache.Del(ctx, "todo:"+id)
+		cache.Del(ctx, "item:"+id)
 	}
 	c.Status(http.StatusNoContent)
 }
