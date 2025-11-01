@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 	"viduli-test-app/database"
 
@@ -25,6 +27,14 @@ func main() {
 	if err != nil {
 		log.Println("No .env file found, using environment variables")
 	}
+
+	log.Println("--- DEBUGGING ENV VARS ---")
+	log.Printf("DB_HOST: [%s]", os.Getenv("DB_HOST"))
+	log.Printf("DB_USER: [%s]", os.Getenv("DB_USER"))
+	log.Printf("DB_NAME: [%s]", os.Getenv("DB_NAME"))
+	log.Printf("SSL_MODE: [%s]", os.Getenv("SSL_MODE"))
+	log.Printf("REDIS_URL: [%s]", os.Getenv("REDIS_URL"))
+	log.Println("----------------------------")
 
 	// Connect to PostgreSQL
 	database.ConnectDB()
@@ -66,17 +76,33 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("Server listening on port %s", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatal(err)
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
 	}
 
-	log.Println("--- DEBUGGING ENV VARS ---")
-	log.Printf("DB_HOST: [%s]", os.Getenv("DB_HOST"))
-	log.Printf("DB_USER: [%s]", os.Getenv("DB_USER"))
-	log.Printf("DB_NAME: [%s]", os.Getenv("DB_NAME"))
-	log.Printf("SSL_MODE: [%s]", os.Getenv("SSL_MODE"))
-	log.Println("----------------------------")
+	log.Printf("Server listening on port %s", port)
+	go func() {
+		// service connections
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shut down the server with
+	// a timeout of 5 seconds.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
+	}
+
+	log.Println("Server exiting")
 }
 
 // POST /items
