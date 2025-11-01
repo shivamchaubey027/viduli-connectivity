@@ -1,43 +1,42 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-type Item struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-}
-
 var (
-	DB       *gorm.DB
-	memLock  sync.Mutex
-	memStore      = make([]Item, 0)
-	nextID   uint = 1
+	db    *gorm.DB
+	cache *redis.Client
+	ctx   = context.Background()
 )
 
-func ConnectDB() error {
+// Todo model
+type Todo struct {
+	ID        uint      `json:"id" gorm:"primary_key"`
+	Title     string    `json:"title"`
+	Completed bool      `json:"completed"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func connectDB() error {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		host := os.Getenv("DB_HOST")
 		if host == "" {
 			host = "localhost"
-		}
-		port := os.Getenv("DB_PORT")
-		if port == "" {
-			port = "5432"
 		}
 		user := os.Getenv("DB_USER")
 		if user == "" {
@@ -51,11 +50,14 @@ func ConnectDB() error {
 		if dbname == "" {
 			dbname = "postgres"
 		}
+		port := os.Getenv("DB_PORT")
+		if port == "" {
+			port = "5432"
+		}
 		sslmode := os.Getenv("SSL_MODE")
 		if sslmode == "" {
 			sslmode = "disable"
 		}
-
 		dsn = "host=" + host +
 			" user=" + user +
 			" password=" + password +
@@ -64,21 +66,18 @@ func ConnectDB() error {
 			" sslmode=" + sslmode
 	}
 
-	// try a couple of times briefly
+	// try a few times
 	var err error
 	for i := 1; i <= 3; i++ {
-		DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		if err == nil {
-			sqlDB, derr := DB.DB()
+			sqlDB, derr := db.DB()
 			if derr == nil {
-				pingErr := sqlDB.Ping()
-				if pingErr == nil {
-					if amErr := DB.AutoMigrate(&Item{}); amErr != nil {
-						log.Printf("AutoMigrate warning: %v", amErr)
-					}
+				if pingErr := sqlDB.Ping(); pingErr == nil {
 					return nil
+				} else {
+					err = pingErr
 				}
-				err = pingErr
 			} else {
 				err = derr
 			}
@@ -89,77 +88,192 @@ func ConnectDB() error {
 	return err
 }
 
+func connectCache() (*redis.Client, error) {
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6380"
+	}
+
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, err
+	}
+
+	client := redis.NewClient(opt)
+	// quick ping
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
 func main() {
 	_ = godotenv.Load() // optional .env
 
-	if err := ConnectDB(); err != nil {
-		log.Println("DB not available, running with in-memory store:", err)
+	// DB
+	if err := connectDB(); err != nil {
+		log.Println("DB not available, running without persistent DB:", err)
 	} else {
-		log.Println("Connected to DB")
+		log.Println("Connected to DB, running migrations")
+		if err := db.AutoMigrate(&Todo{}); err != nil {
+			log.Printf("AutoMigrate warning: %v", err)
+		}
 	}
 
-	r := gin.Default()
+	// Redis
+	c, err := connectCache()
+	if err != nil {
+		log.Println("Redis not available, continuing without cache:", err)
+		cache = nil
+	} else {
+		cache = c
+		log.Println("Connected to Redis")
+	}
 
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	router := gin.Default()
+
+	// serve static assets if present
+	router.Static("/assets", "./public/assets")
+	router.GET("/", func(c *gin.Context) {
+		if _, err := os.Stat("public/index.html"); err == nil {
+			c.File("public/index.html")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Hi from Viduli"})
+	})
+	router.NoRoute(func(c *gin.Context) {
+		if _, err := os.Stat("public/index.html"); err == nil {
+			c.File("public/index.html")
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"message": "Not found"})
 	})
 
-	r.POST("/items", createItem)
-	r.GET("/items", getItems)
+	api := router.Group("/api")
+	{
+		api.GET("/todos", getTodos)
+		api.POST("/todos", createTodo)
+		api.GET("/todos/:id", getTodo)
+		api.PUT("/todos/:id", updateTodo)
+		api.DELETE("/todos/:id", deleteTodo)
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	log.Printf("Server listening on :%s", port)
-	if err := r.Run(":" + port); err != nil {
+	log.Printf("Server starting on :%s", port)
+	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
 
-func createItem(c *gin.Context) {
-	var it Item
-	if err := c.ShouldBindJSON(&it); err != nil {
+func getTodos(c *gin.Context) {
+	var todos []Todo
+	if db != nil {
+		db.Find(&todos)
+		c.JSON(http.StatusOK, todos)
+		return
+	}
+	c.JSON(http.StatusOK, todos) // empty if no DB
+}
+
+func createTodo(c *gin.Context) {
+	var todo Todo
+	if err := c.ShouldBindJSON(&todo); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	it.CreatedAt = time.Now()
-	it.UpdatedAt = it.CreatedAt
-
-	if DB != nil {
-		if err := DB.Create(&it).Error; err != nil {
+	if db != nil {
+		if err := db.Create(&todo).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "DB create failed"})
 			return
 		}
-		c.JSON(http.StatusCreated, it)
+		c.JSON(http.StatusCreated, todo)
 		return
 	}
-
-	// in-memory fallback
-	memLock.Lock()
-	it.ID = nextID
-	nextID++
-	memStore = append(memStore, it)
-	memLock.Unlock()
-
-	c.JSON(http.StatusCreated, it)
+	// no persistent DB: set timestamps and return created id = 0
+	todo.CreatedAt = time.Now()
+	todo.UpdatedAt = todo.CreatedAt
+	c.JSON(http.StatusCreated, todo)
 }
 
-func getItems(c *gin.Context) {
-	if DB != nil {
-		var items []Item
-		if err := DB.Find(&items).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "DB query failed"})
+func getTodo(c *gin.Context) {
+	var todo Todo
+	id := c.Param("id")
+
+	// cache hit
+	if cache != nil {
+		if val, err := cache.Get(ctx, "todo:"+id).Result(); err == nil && strings.TrimSpace(val) != "" {
+			c.Data(http.StatusOK, "application/json", []byte(val))
 			return
 		}
-		c.JSON(http.StatusOK, items)
+	}
+
+	if db == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
 		return
 	}
 
-	memLock.Lock()
-	items := make([]Item, len(memStore))
-	copy(items, memStore)
-	memLock.Unlock()
+	if err := db.First(&todo, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+		return
+	}
 
-	c.JSON(http.StatusOK, items)
+	if cache != nil {
+		if jsonTodo, err := json.Marshal(todo); err == nil {
+			cache.Set(ctx, "todo:"+id, jsonTodo, 10*time.Minute)
+		}
+	}
+
+	c.JSON(http.StatusOK, todo)
+}
+
+func updateTodo(c *gin.Context) {
+	var todo Todo
+	id := c.Param("id")
+
+	if db == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+		return
+	}
+
+	if err := db.First(&todo, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+		return
+	}
+
+	if err := c.ShouldBindJSON(&todo); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	db.Save(&todo)
+	if cache != nil {
+		cache.Del(ctx, "todo:"+id)
+	}
+	c.JSON(http.StatusOK, todo)
+}
+
+func deleteTodo(c *gin.Context) {
+	var todo Todo
+	id := c.Param("id")
+
+	if db == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+		return
+	}
+
+	if err := db.First(&todo, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+		return
+	}
+
+	db.Delete(&todo)
+	if cache != nil {
+		cache.Del(ctx, "todo:"+id)
+	}
+	c.Status(http.StatusNoContent)
 }
