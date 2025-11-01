@@ -21,17 +21,14 @@ var (
 )
 
 func main() {
-	// Load .env file
 	var err error
 	err = godotenv.Load()
 	if err != nil {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	// Connect to PostgreSQL
 	database.ConnectDB()
 
-	// Connect to Redis
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
 		redisURL = "redis://localhost:6379/0"
@@ -50,16 +47,13 @@ func main() {
 
 	r := gin.Default()
 
-	// Health check endpoint
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// Item endpoints
 	r.POST("/items", createItem)
 	r.GET("items", getItems)
 
-	// Cache endpoints
 	r.POST("/cache", setCache)
 	r.GET("/cache/:key", getCache)
 
@@ -75,14 +69,11 @@ func main() {
 
 	log.Printf("Server listening on port %s", port)
 	go func() {
-		// service connections
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %s\n", err)
 		}
 	}()
 
-	// Wait for interrupt signal to gracefully shut down the server with
-	// a timeout of 5 seconds.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
@@ -97,7 +88,6 @@ func main() {
 	log.Println("Server exiting")
 }
 
-// POST /items
 func createItem(c *gin.Context) {
 	var newItem database.Item
 	if err := c.ShouldBindJSON(&newItem); err != nil {
@@ -115,7 +105,6 @@ func createItem(c *gin.Context) {
 	c.JSON(http.StatusCreated, newItem)
 }
 
-// GET /items
 func getItems(c *gin.Context) {
 	var items []database.Item
 	if err := database.DB.Find(&items).Error; err != nil {
@@ -126,7 +115,6 @@ func getItems(c *gin.Context) {
 	c.JSON(http.StatusOK, items)
 }
 
-// POST /cache
 func setCache(c *gin.Context) {
 	var newCacheItem struct {
 		Key   string `json:"key"`
@@ -147,7 +135,6 @@ func setCache(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-// GET /cache/:key
 func getCache(c *gin.Context) {
 	key := c.Param("key")
 	val, err := rdb.Get(ctx, key).Result()

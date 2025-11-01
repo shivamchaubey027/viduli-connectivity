@@ -24,7 +24,6 @@ type Item struct {
 func ConnectDB() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		// Build DSN from individual environment variables if DATABASE_URL isn't set
 		host := os.Getenv("DB_HOST")
 		port := os.Getenv("DB_PORT")
 		user := os.Getenv("DB_USER")
@@ -48,7 +47,6 @@ func ConnectDB() {
 			dbname = "postgres"
 		}
 		if sslmode == "" {
-			// default to disable for local development; change to "require" in production if needed
 			sslmode = "disable"
 		}
 
@@ -57,7 +55,6 @@ func ConnectDB() {
 			host, user, password, dbname, port, sslmode,
 		)
 
-		// Log a sanitized DSN (do not print password)
 		sanitized := fmt.Sprintf(
 			"host=%s user=%s dbname=%s port=%s sslmode=%s",
 			host, user, dbname, port, sslmode,
@@ -71,6 +68,5 @@ func ConnectDB() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
-	// Migrate the schema
 	DB.AutoMigrate(&Item{})
 }
