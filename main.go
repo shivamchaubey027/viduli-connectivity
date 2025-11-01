@@ -36,6 +36,8 @@ func connectDB() error {
 	if dsn == "" {
 		dsn = "host=localhost user=postgres password=postgres dbname=postgres port=5432 sslmode=disable"
 	}
+	log.Printf("DSN being used: '%s'", dsn)
+
 	var err error
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
