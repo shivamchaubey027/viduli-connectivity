@@ -28,14 +28,6 @@ func main() {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	log.Println("--- DEBUGGING ENV VARS ---")
-	log.Printf("DB_HOST: [%s]", os.Getenv("DB_HOST"))
-	log.Printf("DB_USER: [%s]", os.Getenv("DB_USER"))
-	log.Printf("DB_NAME: [%s]", os.Getenv("DB_NAME"))
-	log.Printf("SSL_MODE: [%s]", os.Getenv("SSL_MODE"))
-	log.Printf("REDIS_URL: [%s]", os.Getenv("REDIS_URL"))
-	log.Println("----------------------------")
-
 	// Connect to PostgreSQL
 	database.ConnectDB()
 
