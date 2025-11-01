@@ -27,7 +27,7 @@ func main() {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	database.ConnectDB()
+	// database.ConnectDB()
 
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
@@ -51,8 +51,8 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	r.POST("/items", createItem)
-	r.GET("items", getItems)
+	// r.POST("/items", createItem)
+	// r.GET("/items", getItems)
 
 	r.POST("/cache", setCache)
 	r.GET("/cache/:key", getCache)
