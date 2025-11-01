@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -31,11 +30,15 @@ func main() {
 	database.ConnectDB()
 
 	// Connect to Redis
-	rdb = redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", os.Getenv("REDIS_HOST"), os.Getenv("REDIS_PORT")),
-		Password: os.Getenv("REDIS_PASSWORD"), // no password set
-		DB:       0,                           // use default DB
-	})
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379/0"
+	}
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		log.Fatalf("Could not parse Redis URL: %v", err)
+	}
+	rdb = redis.NewClient(opt)
 
 	_, err = rdb.Ping(ctx).Result()
 	if err != nil {
