@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -22,7 +25,6 @@ var (
 	ctx   = context.Background()
 )
 
-// Item model
 type Item struct {
 	ID          uint      `json:"id" gorm:"primaryKey"`
 	Name        string    `json:"name"`
@@ -33,26 +35,25 @@ type Item struct {
 
 func connectDB() error {
 	dsn := os.Getenv("DATABASE_URL")
+	var host, port, password string
+
 	if dsn == "" {
-		host := os.Getenv("DB_HOST")
+		host = os.Getenv("DB_HOST")
 		if host == "" {
 			host = "localhost"
+		}
+		port = os.Getenv("DB_PORT")
+		if port == "" {
+			port = "5432"
 		}
 		user := os.Getenv("DB_USER")
 		if user == "" {
 			user = "postgres"
 		}
-		password := os.Getenv("DB_PASSWORD")
-		if password == "" {
-			password = "postgres"
-		}
+		password = os.Getenv("DB_PASSWORD")
 		dbname := os.Getenv("DB_NAME")
 		if dbname == "" {
 			dbname = "postgres"
-		}
-		port := os.Getenv("DB_PORT")
-		if port == "" {
-			port = "5432"
 		}
 		sslmode := os.Getenv("SSL_MODE")
 		if sslmode == "" {
@@ -64,28 +65,78 @@ func connectDB() error {
 			" dbname=" + dbname +
 			" port=" + port +
 			" sslmode=" + sslmode
+	} else {
+		// parse DATABASE_URL for host/port/password for diagnostics
+		if u, err := url.Parse(dsn); err == nil {
+			if h := u.Hostname(); h != "" {
+				host = h
+			}
+			if p := u.Port(); p != "" {
+				port = p
+			} else {
+				port = "5432"
+			}
+			if u.User != nil {
+				if pw, ok := u.User.Password(); ok {
+					password = pw
+				}
+			}
+		}
+		if host == "" {
+			host = "localhost"
+		}
+		if port == "" {
+			port = "5432"
+		}
 	}
 
-	// try a few times
-	var err error
+	// sanitized DSN for logs (don't print password)
+	safeDSN := strings.ReplaceAll(dsn, "password="+password, "password=REDACTED")
+	log.Printf("connectDB: attempting with DSN: %s", safeDSN)
+	addr := net.JoinHostPort(host, port)
+
+	// raw TCP check
+	dialErr := func() error {
+		conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+		if err != nil {
+			return err
+		}
+		_ = conn.Close()
+		return nil
+	}()
+
+	if dialErr != nil {
+		log.Printf("connectDB: RAW TCP connect to %s failed: %v", addr, dialErr)
+	} else {
+		log.Printf("connectDB: RAW TCP connect to %s succeeded", addr)
+	}
+
+	// try GORM open + ping with retries and clear logging
+	var openErr error
 	for i := 1; i <= 3; i++ {
-		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
-		if err == nil {
+		db, openErr = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		if openErr == nil {
 			sqlDB, derr := db.DB()
 			if derr == nil {
 				if pingErr := sqlDB.Ping(); pingErr == nil {
+					log.Printf("connectDB: connected to DB on attempt %d", i)
 					return nil
 				} else {
-					err = pingErr
+					openErr = pingErr
 				}
 			} else {
-				err = derr
+				openErr = derr
 			}
 		}
-		log.Printf("DB connect attempt %d failed: %v", i, err)
+		log.Printf("connectDB: gorm attempt %d failed: %v", i, openErr)
 		time.Sleep(time.Duration(i) * time.Second)
 	}
-	return err
+
+	// helpful guidance in error
+	if dialErr != nil {
+		return fmt.Errorf("gorm/connect failed: %w; raw tcp error: %v", openErr, dialErr)
+	}
+	return openErr
 }
 
 func connectCache() (*redis.Client, error) {
@@ -170,7 +221,6 @@ func main() {
 	}
 }
 
-// Handlers for items
 func getItems(c *gin.Context) {
 	var items []Item
 	if db != nil {
@@ -178,7 +228,7 @@ func getItems(c *gin.Context) {
 		c.JSON(http.StatusOK, items)
 		return
 	}
-	c.JSON(http.StatusOK, items) // empty if no DB
+	c.JSON(http.StatusOK, items)
 }
 
 func createItem(c *gin.Context) {
