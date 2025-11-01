@@ -1,9 +1,7 @@
 package database
 
 import (
-	"fmt"
 	"log"
-	"net/url"
 	"os"
 	"time"
 
@@ -22,34 +20,15 @@ var DB *gorm.DB
 func ConnectDB() {
 	var err error
 
-	host := os.Getenv("NEW_POSTGRES_DATABASE_HOST")
-	port := os.Getenv("NEW_POSTGRES_DATABASE_PORT")
-	user := os.Getenv("NEW_POSTGRES_DATABASE_USER")
-	dbname := os.Getenv("NEW_POSTGRES_DATABASE_DATA")
-	passwordRaw := os.Getenv("NEW_POSTGRES_DATABASE_PASSWORD")
-
-	if host == "" || port == "" || user == "" || dbname == "" || passwordRaw == "" {
-		log.Fatal("Database environment variables are not fully set")
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = "host=localhost user=postgres password=postgres dbname=postgres port=5432 sslmode=disable"
 	}
-
-	password := url.QueryEscape(passwordRaw)
-
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require",
-		host,
-		user,
-		password,
-		dbname,
-		port,
-	)
-
-	log.Println("Connecting to database...")
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		log.Fatal("Failed to connect to database:", err)
 	}
 
-	log.Println("Database connected successfully!")
-
+	// Migrate the schema
 	DB.AutoMigrate(&Item{})
-	log.Println("Database migration complete.")
 }
