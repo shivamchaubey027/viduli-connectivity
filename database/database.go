@@ -13,7 +13,6 @@ import (
 
 var DB *gorm.DB
 
-// Item represents a simple database model for migration.
 type Item struct {
 	ID          uint `gorm:"primaryKey"`
 	CreatedAt   time.Time
@@ -26,10 +25,8 @@ type Item struct {
 func ConnectDB() {
 	var dsn string
 
-	// Check if DATABASE_URL is provided (single connection string)
 	dsn = os.Getenv("DATABASE_URL")
 
-	// If not, build DSN from separate env vars
 	if dsn == "" {
 		host := os.Getenv("DB_HOST")
 		user := os.Getenv("DB_USER")
@@ -49,7 +46,6 @@ func ConnectDB() {
 			host, user, password, dbname, port, sslmode)
 	}
 
-	// Fallback to localhost for local dev
 	if dsn == "" {
 		dsn = "host=localhost user=postgres password=postgres dbname=postgres port=5432 sslmode=disable"
 	}
@@ -66,7 +62,5 @@ func ConnectDB() {
 }
 
 func maskPassword(dsn string) string {
-	// Simple masking for logging - don't expose password
-	// Just for debug purposes
 	return strings.Replace(dsn, "password=", "password=***", 1)
 }
