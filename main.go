@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -38,7 +39,7 @@ func connectDB() error {
 	var err error
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		return fmt.Errorf("Failed to connect to database: %v", err)
 	}
 
 	db.AutoMigrate(&Item{})
