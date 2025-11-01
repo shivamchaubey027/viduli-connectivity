@@ -1,49 +1,102 @@
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
+	"sync"
 	"time"
-	"viduli-test-app/database"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
+
+type Item struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+}
 
 var (
-	rdb *redis.Client
-	ctx = context.Background()
+	DB       *gorm.DB
+	memLock  sync.Mutex
+	memStore      = make([]Item, 0)
+	nextID   uint = 1
 )
 
-func main() {
-	var err error
-	err = godotenv.Load()
-	if err != nil {
-		log.Println("No .env file found, using environment variables")
+func ConnectDB() error {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		host := os.Getenv("DB_HOST")
+		if host == "" {
+			host = "localhost"
+		}
+		port := os.Getenv("DB_PORT")
+		if port == "" {
+			port = "5432"
+		}
+		user := os.Getenv("DB_USER")
+		if user == "" {
+			user = "postgres"
+		}
+		password := os.Getenv("DB_PASSWORD")
+		if password == "" {
+			password = "postgres"
+		}
+		dbname := os.Getenv("DB_NAME")
+		if dbname == "" {
+			dbname = "postgres"
+		}
+		sslmode := os.Getenv("SSL_MODE")
+		if sslmode == "" {
+			sslmode = "disable"
+		}
+
+		dsn = "host=" + host +
+			" user=" + user +
+			" password=" + password +
+			" dbname=" + dbname +
+			" port=" + port +
+			" sslmode=" + sslmode
 	}
 
-	// database.ConnectDB()
+	// try a couple of times briefly
+	var err error
+	for i := 1; i <= 3; i++ {
+		DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		if err == nil {
+			sqlDB, derr := DB.DB()
+			if derr == nil {
+				pingErr := sqlDB.Ping()
+				if pingErr == nil {
+					if amErr := DB.AutoMigrate(&Item{}); amErr != nil {
+						log.Printf("AutoMigrate warning: %v", amErr)
+					}
+					return nil
+				}
+				err = pingErr
+			} else {
+				err = derr
+			}
+		}
+		log.Printf("DB connect attempt %d failed: %v", i, err)
+		time.Sleep(time.Duration(i) * time.Second)
+	}
+	return err
+}
 
-	// redisURL := os.Getenv("REDIS_URL")
-	// if redisURL == "" {
-	// 	redisURL = "redis://localhost:6379/0"
-	// }
-	// opt, err := redis.ParseURL(redisURL)
-	// if err != nil {
-	// 	log.Fatalf("Could not parse Redis URL: %v", err)
-	// }
-	// rdb = redis.NewClient(opt)
+func main() {
+	_ = godotenv.Load() // optional .env
 
-	// _, err = rdb.Ping(ctx).Result()
-	// if err != nil {
-	// 	log.Fatalf("Could not connect to Redis: %v", err)
-	// }
-	// log.Println("Connected to Redis")
+	if err := ConnectDB(); err != nil {
+		log.Println("DB not available, running with in-memory store:", err)
+	} else {
+		log.Println("Connected to DB")
+	}
 
 	r := gin.Default()
 
@@ -51,100 +104,62 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// r.POST("/items", createItem)
-	// r.GET("/items", getItems)
-
-	r.POST("/cache", setCache)
-	r.GET("/cache/:key", getCache)
+	r.POST("/items", createItem)
+	r.GET("/items", getItems)
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-
-	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: r,
+	log.Printf("Server listening on :%s", port)
+	if err := r.Run(":" + port); err != nil {
+		log.Fatalf("server failed: %v", err)
 	}
-
-	log.Printf("Server listening on port %s", port)
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %s\n", err)
-		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("Shutting down server...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal("Server forced to shutdown:", err)
-	}
-
-	log.Println("Server exiting")
 }
 
 func createItem(c *gin.Context) {
-	var newItem database.Item
-	if err := c.ShouldBindJSON(&newItem); err != nil {
+	var it Item
+	if err := c.ShouldBindJSON(&it); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	it.CreatedAt = time.Now()
+	it.UpdatedAt = it.CreatedAt
 
-	newItem.CreatedAt = time.Now()
-
-	if err := database.DB.Create(&newItem).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create item"})
+	if DB != nil {
+		if err := DB.Create(&it).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "DB create failed"})
+			return
+		}
+		c.JSON(http.StatusCreated, it)
 		return
 	}
 
-	c.JSON(http.StatusCreated, newItem)
+	// in-memory fallback
+	memLock.Lock()
+	it.ID = nextID
+	nextID++
+	memStore = append(memStore, it)
+	memLock.Unlock()
+
+	c.JSON(http.StatusCreated, it)
 }
 
 func getItems(c *gin.Context) {
-	var items []database.Item
-	if err := database.DB.Find(&items).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve items"})
+	if DB != nil {
+		var items []Item
+		if err := DB.Find(&items).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "DB query failed"})
+			return
+		}
+		c.JSON(http.StatusOK, items)
 		return
 	}
+
+	memLock.Lock()
+	items := make([]Item, len(memStore))
+	copy(items, memStore)
+	memLock.Unlock()
 
 	c.JSON(http.StatusOK, items)
-}
-
-func setCache(c *gin.Context) {
-	var newCacheItem struct {
-		Key   string `json:"key"`
-		Value string `json:"value"`
-	}
-
-	if err := c.ShouldBindJSON(&newCacheItem); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	err := rdb.Set(ctx, newCacheItem.Key, newCacheItem.Value, 1*time.Minute).Err()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set cache"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
-}
-
-func getCache(c *gin.Context) {
-	key := c.Param("key")
-	val, err := rdb.Get(ctx, key).Result()
-	if err == redis.Nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Key not found"})
-		return
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get cache"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"value": val})
 }
