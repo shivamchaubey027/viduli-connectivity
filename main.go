@@ -29,21 +29,21 @@ func main() {
 
 	// database.ConnectDB()
 
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		redisURL = "redis://localhost:6379/0"
-	}
-	opt, err := redis.ParseURL(redisURL)
-	if err != nil {
-		log.Fatalf("Could not parse Redis URL: %v", err)
-	}
-	rdb = redis.NewClient(opt)
+	// redisURL := os.Getenv("REDIS_URL")
+	// if redisURL == "" {
+	// 	redisURL = "redis://localhost:6379/0"
+	// }
+	// opt, err := redis.ParseURL(redisURL)
+	// if err != nil {
+	// 	log.Fatalf("Could not parse Redis URL: %v", err)
+	// }
+	// rdb = redis.NewClient(opt)
 
-	_, err = rdb.Ping(ctx).Result()
-	if err != nil {
-		log.Fatalf("Could not connect to Redis: %v", err)
-	}
-	log.Println("Connected to Redis")
+	// _, err = rdb.Ping(ctx).Result()
+	// if err != nil {
+	// 	log.Fatalf("Could not connect to Redis: %v", err)
+	// }
+	// log.Println("Connected to Redis")
 
 	r := gin.Default()
 
